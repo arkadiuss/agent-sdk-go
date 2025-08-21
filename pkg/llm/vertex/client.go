@@ -204,12 +204,7 @@ func (c *Client) GenerateWithTools(ctx context.Context, prompt string, tools []i
 	}
 
 	// Create contents for the prompt
-	contents := []*genai.Content{
-		{
-			Role:  genai.RoleUser,
-			Parts: []*genai.Part{genai.NewPartFromText(prompt)},
-		},
-	}
+	contents := []*genai.Content{}
 
 	// Add system message if provided
 	if params.SystemMessage != "" {
@@ -261,13 +256,14 @@ func (c *Client) GenerateWithTools(ctx context.Context, prompt string, tools []i
 		return "", fmt.Errorf("failed to create chat: %w", err)
 	}
 
+	nextMessage := []*genai.Part{genai.NewPartFromText(prompt)}
 	// Iterative tool calling loop
 	for iteration := 0; iteration < maxIterations; iteration++ {
 		// Generate content with retry logic
 		var response *genai.GenerateContentResponse
 		err := c.withRetry(ctx, func() error {
 			var genErr error
-			response, genErr = chatSession.Send(ctx)
+			response, genErr = chatSession.Send(ctx, nextMessage...)
 			return genErr
 		})
 
@@ -426,10 +422,7 @@ func (c *Client) GenerateWithTools(ctx context.Context, prompt string, tools []i
 		}
 
 		// Continue conversation by sending tool responses
-		_, err = chatSession.Send(ctx, functionResponses...)
-		if err != nil {
-			return "", fmt.Errorf("failed to send function responses (iteration %d): %w", iteration+1, err)
-		}
+		nextMessage = functionResponses
 	}
 
 	// Final call asking for conclusion
