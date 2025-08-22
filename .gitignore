@@ -62,5 +62,5 @@ debug.test
 bin/
 dist/
 
-# Python venv
+# Python virtualenv
 venv/
