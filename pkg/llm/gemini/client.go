@@ -44,9 +44,16 @@ const (
 
 // GeminiClient implements the LLM interface for Google Gemini API
 type GeminiClient struct {
+<<<<<<< HEAD
 	client         *genai.Client
 	apiKey         string
 	model          string
+=======
+	genaiClient    *genai.Client
+	apiKey         string
+	model          string
+	backend        genai.Backend
+>>>>>>> 5a66b02 (feat: add built client possibility in gemini and fix tools use)
 	logger         logging.Logger
 	retryExecutor  *retry.Executor
 	thinkingConfig *ThinkingConfig
@@ -84,17 +91,28 @@ func WithBaseURL(baseURL string) Option {
 	}
 }
 
+// WithClient injects an already initialized genai.Client. If set, NewClient won't build a new client
+func WithClient(existing *genai.Client) Option {
+	return func(c *GeminiClient) {
+		c.genaiClient = existing
+	}
+}
+
+// WithBackend sets the backend for the Gemini client
+func WithBackend(backend genai.Backend) Option {
+	return func(c *GeminiClient) {
+		c.backend = backend
+	}
+}
+
 // NewClient creates a new Gemini client
 func NewClient(apiKey string, options ...Option) (*GeminiClient, error) {
-	if apiKey == "" {
-		return nil, fmt.Errorf("API key is required")
-	}
-
 	// Create client with default options
 	defaultThinking := DefaultThinkingConfig()
 	client := &GeminiClient{
 		apiKey:         apiKey,
 		model:          DefaultModel,
+		backend:        genai.BackendGeminiAPI,
 		logger:         logging.New(),
 		thinkingConfig: &defaultThinking,
 	}
@@ -104,17 +122,26 @@ func NewClient(apiKey string, options ...Option) (*GeminiClient, error) {
 		option(client)
 	}
 
+	// If an existing client was injected, use it
+	if client.genaiClient != nil {
+		return client, nil
+	}
+
+	if apiKey == "" {
+		return nil, fmt.Errorf("API key is required")
+	}
+
 	// Create the genai client
 	ctx := context.Background()
 	genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
 		APIKey:  apiKey,
-		Backend: genai.BackendGeminiAPI,
+		Backend: client.backend,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
 	}
 
-	client.client = genaiClient
+	client.genaiClient = genaiClient
 
 	return client, nil
 }
@@ -265,7 +292,11 @@ func (c *GeminiClient) Generate(ctx context.Context, prompt string, options ...i
 			}
 		}
 
+<<<<<<< HEAD
 		result, err = c.client.Models.GenerateContent(ctx, c.model, contents, config)
+=======
+		result, err = c.genaiClient.Models.GenerateContent(ctx, c.model, contents, config)
+>>>>>>> 5a66b02 (feat: add built client possibility in gemini and fix tools use)
 		if err != nil {
 			c.logger.Error(ctx, "Error from Gemini API", map[string]interface{}{
 				"error": err.Error(),
@@ -363,7 +394,7 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 	_ = orgID // Mark as used to avoid linter warning
 
 	// Convert tools to Gemini format
-	geminiTools := make([]*genai.Tool, 0, len(tools))
+	geminiTools := make([]*genai.FunctionDeclaration, 0, len(tools))
 	for _, tool := range tools {
 		functionDeclaration := &genai.FunctionDeclaration{
 			Name:        tool.Name(),
@@ -439,9 +470,7 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 			}
 		}
 
-		geminiTools = append(geminiTools, &genai.Tool{
-			FunctionDeclarations: []*genai.FunctionDeclaration{functionDeclaration},
-		})
+		geminiTools = append(geminiTools, functionDeclaration)
 	}
 
 	// Create contents array starting with system message if provided
@@ -554,7 +583,11 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 		c.logger.Debug(ctx, "Sending request with tools to Gemini", logData)
 
 		config := &genai.GenerateContentConfig{
-			Tools:             geminiTools,
+			Tools: []*genai.Tool{
+				{
+					FunctionDeclarations: geminiTools,
+				},
+			},
 			SystemInstruction: systemInstruction,
 		}
 
@@ -577,7 +610,11 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 			}
 		}
 
+<<<<<<< HEAD
 		result, err := c.client.Models.GenerateContent(ctx, c.model, contents, config)
+=======
+		result, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, config)
+>>>>>>> 5a66b02 (feat: add built client possibility in gemini and fix tools use)
 		if err != nil {
 			c.logger.Error(ctx, "Error from Gemini API", map[string]interface{}{"error": err.Error()})
 			return "", fmt.Errorf("failed to create content: %w", err)
@@ -915,7 +952,11 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 		}
 	}
 
+<<<<<<< HEAD
 	finalResult, err := c.client.Models.GenerateContent(ctx, c.model, contents, config)
+=======
+	finalResult, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, config)
+>>>>>>> 5a66b02 (feat: add built client possibility in gemini and fix tools use)
 	if err != nil {
 		c.logger.Error(ctx, "Error in final call without tools", map[string]interface{}{"error": err.Error()})
 		return "", fmt.Errorf("failed to create final content: %w", err)

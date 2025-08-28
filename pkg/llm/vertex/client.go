@@ -334,13 +334,7 @@ func (c *Client) GenerateWithTools(ctx context.Context, prompt string, tools []i
 					})
 				}
 
-				// Create function response with error
-				funcResponse := genai.FunctionResponse{
-					Name:     funcCall.Name,
-					Response: map[string]any{"result": errorMessage},
-				}
-
-				functionResponses = append(functionResponses, funcResponse)
+				functionResponses = append(functionResponses, genai.NewPartFromFunctionResponse(funcCall.Name, map[string]any{"result": errorMessage}))
 				continue // Continue processing other function calls
 			}
 

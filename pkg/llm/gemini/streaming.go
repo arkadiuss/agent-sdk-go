@@ -228,7 +228,7 @@ func (c *GeminiClient) GenerateStream(ctx context.Context, prompt string, option
 		var accumulatedContent strings.Builder
 
 		// Start streaming
-		streamIter := c.client.Models.GenerateContentStream(ctx, c.model, contents, config)
+		streamIter := c.genaiClient.Models.GenerateContentStream(ctx, c.model, contents, config)
 
 		for response, err := range streamIter {
 			if err != nil {
@@ -927,7 +927,7 @@ func (c *GeminiClient) executeStreamingRequestWithToolCapture(
 	})
 
 	// Generate content with tools
-	result, err := c.client.Models.GenerateContent(ctx, c.model, contents, config)
+	result, err := c.genaiClient.Models.GenerateContent(ctx, c.model, contents, config)
 	if err != nil {
 		return nil, false, fmt.Errorf("failed to generate content: %w", err)
 	}

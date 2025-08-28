@@ -507,7 +507,7 @@ func TestGenerateWithLLMConfig(t *testing.T) {
 		interfaces.WithTemperature(0.5),
 		interfaces.WithTopP(0.9),
 		interfaces.WithStopSequences([]string{"###"}),
-		interfaces.WithReasoning("minimal"),
+		interfaces.WithReasoning(true),
 	)
 
 	if err != nil {
