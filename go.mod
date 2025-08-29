@@ -5,7 +5,6 @@ go 1.24
 require (
 	cloud.google.com/go/auth v0.16.3
 	github.com/alicebob/miniredis/v2 v2.35.0
-	github.com/cenkalti/backoff/v4 v4.3.0
 	github.com/go-openapi/strfmt v0.23.0
 	github.com/go-redis/redis/v8 v8.11.5
 	github.com/google/go-github/v45 v45.2.0
