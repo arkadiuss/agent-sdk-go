@@ -393,9 +393,6 @@ client, err := gemini.NewClient(ctx,
     gemini.WithRetry(
         retry.WithMaxAttempts(5),
     ),
-
-    // Custom endpoint (if needed for Gemini API)
-    gemini.WithBaseURL("https://custom-endpoint.com"),
 )
 
 // Example for Vertex AI Backend
