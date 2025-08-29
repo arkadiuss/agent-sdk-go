@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"cloud.google.com/go/auth/credentials"
 	"google.golang.org/genai"
 
 	"github.com/Ingenimax/agent-sdk-go/pkg/interfaces"
@@ -44,13 +45,16 @@ const (
 
 // GeminiClient implements the LLM interface for Google Gemini API
 type GeminiClient struct {
-	genaiClient    *genai.Client
-	apiKey         string
-	model          string
-	backend        genai.Backend
-	logger         logging.Logger
-	retryExecutor  *retry.Executor
-	thinkingConfig *ThinkingConfig
+	genaiClient     *genai.Client
+	apiKey          string
+	model           string
+	backend         genai.Backend
+	projectID       string
+	location        string
+	credentialsFile string
+	logger          logging.Logger
+	retryExecutor   *retry.Executor
+	thinkingConfig  *ThinkingConfig
 }
 
 // Option represents an option for configuring the Gemini client
@@ -77,6 +81,13 @@ func WithRetry(opts ...retry.Option) Option {
 	}
 }
 
+// WithAPIKey sets the API key for Gemini API backend
+func WithAPIKey(apiKey string) Option {
+	return func(c *GeminiClient) {
+		c.apiKey = apiKey
+	}
+}
+
 // WithBaseURL sets the base URL for the Gemini client (not used with genai package)
 func WithBaseURL(baseURL string) Option {
 	return func(c *GeminiClient) {
@@ -99,14 +110,34 @@ func WithBackend(backend genai.Backend) Option {
 	}
 }
 
+// WithProjectID sets the GCP project ID for Vertex AI backend
+func WithProjectID(projectID string) Option {
+	return func(c *GeminiClient) {
+		c.projectID = projectID
+	}
+}
+
+// WithLocation sets the GCP location for Vertex AI backend
+func WithLocation(location string) Option {
+	return func(c *GeminiClient) {
+		c.location = location
+	}
+}
+
+func WithCredentialsFile(credentialsFile string) Option {
+	return func(c *GeminiClient) {
+		c.credentialsFile = credentialsFile
+	}
+}
+
 // NewClient creates a new Gemini client
-func NewClient(apiKey string, options ...Option) (*GeminiClient, error) {
+func NewClient(ctx context.Context, options ...Option) (*GeminiClient, error) {
 	// Create client with default options
 	defaultThinking := DefaultThinkingConfig()
 	client := &GeminiClient{
-		apiKey:         apiKey,
 		model:          DefaultModel,
 		backend:        genai.BackendGeminiAPI,
+		location:       "us-central1", // Default Vertex AI location
 		logger:         logging.New(),
 		thinkingConfig: &defaultThinking,
 	}
@@ -121,21 +152,48 @@ func NewClient(apiKey string, options ...Option) (*GeminiClient, error) {
 		return client, nil
 	}
 
-	if apiKey == "" {
-		return nil, fmt.Errorf("API key is required")
-	}
+	// Create the genai client if not already provided
+	if client.genaiClient == nil {
+		config := &genai.ClientConfig{
+			Backend: client.backend,
+		}
 
-	// Create the genai client
-	ctx := context.Background()
-	genaiClient, err := genai.NewClient(ctx, &genai.ClientConfig{
-		APIKey:  apiKey,
-		Backend: client.backend,
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to create Gemini client: %w", err)
-	}
+		// Configure based on backend type
+		switch client.backend {
+		case genai.BackendGeminiAPI:
+			if client.apiKey == "" {
+				return nil, fmt.Errorf("API key is required for Gemini API backend")
+			}
+			config.APIKey = client.apiKey
+		case genai.BackendVertexAI:
+			if client.projectID == "" && client.credentialsFile == "" && client.apiKey == "" {
+				return nil, fmt.Errorf("project ID, credentials file or API key are required for Vertex AI backend")
+			}
+			if client.credentialsFile != "" {
+				creds, err := credentials.DetectDefault(&credentials.DetectOptions{
+					CredentialsFile: client.credentialsFile,
+				})
+				if err != nil {
+					return nil, fmt.Errorf("failed to load credentials from file: %w", err)
+				}
+				config.Credentials = creds
+			}
+			if client.projectID != "" {
+				config.Project = client.projectID
+				config.Location = client.location
+			}
+			if client.apiKey != "" {
+				config.APIKey = client.apiKey
+			}
+		}
 
-	client.genaiClient = genaiClient
+		genaiClient, err := genai.NewClient(ctx, config)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create Gemini client: %w", err)
+		}
+
+		client.genaiClient = genaiClient
+	}
 
 	return client, nil
 }
@@ -475,9 +533,6 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 	if params.SystemMessage != "" {
 		systemMessage := params.SystemMessage
 
-		// Add tool usage guidance
-		systemMessage += "\n\nIMPORTANT: When using the calculator tool, it only supports binary operations (two numbers at a time). For complex calculations like 3.14159*7*7, break it down into steps: first calculate 3.14159*7, then multiply that result by 7."
-
 		// Log reasoning mode usage - only affects native thinking models (2.5 series)
 		if params.LLMConfig != nil && params.LLMConfig.Reasoning != "" {
 			if SupportsThinking(c.model) {
@@ -648,6 +703,9 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 		}
 		contents = append(contents, assistantContent)
 
+		// Collect all function responses to add them in a single content message
+		var functionResponses []*genai.Part
+
 		// Process each function call
 		for _, part := range candidate.Content.Parts {
 			if part.FunctionCall == nil {
@@ -670,21 +728,15 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 					"toolName": functionCall.Name,
 				})
 
-				// Add tool not found error as function response instead of returning
-				errorContent := &genai.Content{
-					Role: "user",
-					Parts: []*genai.Part{
-						{
-							FunctionResponse: &genai.FunctionResponse{
-								Name: functionCall.Name,
-								Response: map[string]any{
-									"error": fmt.Sprintf("tool not found: %s", functionCall.Name),
-								},
-							},
+				// Add tool not found error as function response
+				functionResponses = append(functionResponses, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name: functionCall.Name,
+						Response: map[string]any{
+							"error": fmt.Sprintf("tool not found: %s", functionCall.Name),
 						},
 					},
-				}
-				contents = append(contents, errorContent)
+				})
 
 				// Store failed tool call in memory if provided
 				if params.Memory != nil {
@@ -808,7 +860,6 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 				}
 			}
 
-			var resultContent *genai.Content
 			if err != nil {
 				c.logger.Error(ctx, "Tool execution failed", map[string]interface{}{
 					"toolName": selectedTool.Name(),
@@ -820,42 +871,41 @@ func (c *GeminiClient) GenerateWithTools(ctx context.Context, prompt string, too
 				toolCallTrace.Result = fmt.Sprintf("Error: %v", err)
 
 				// Add error message as function response
-				resultContent = &genai.Content{
-					Role: "user",
-					Parts: []*genai.Part{
-						{
-							FunctionResponse: &genai.FunctionResponse{
-								Name: functionCall.Name,
-								Response: map[string]any{
-									"error": err.Error(),
-								},
-							},
+				functionResponses = append(functionResponses, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name: functionCall.Name,
+						Response: map[string]any{
+							"error": err.Error(),
 						},
 					},
-				}
+				})
 			} else {
 				toolCallTrace.Result = toolResult
 
-				// Add tool result to messages
-				resultContent = &genai.Content{
-					Role: "user",
-					Parts: []*genai.Part{
-						{
-							FunctionResponse: &genai.FunctionResponse{
-								Name: functionCall.Name,
-								Response: map[string]any{
-									"result": toolResult,
-								},
-							},
+				// Add tool result as function response
+				functionResponses = append(functionResponses, &genai.Part{
+					FunctionResponse: &genai.FunctionResponse{
+						Name: functionCall.Name,
+						Response: map[string]any{
+							"result": toolResult,
 						},
 					},
-				}
+				})
 			}
-
-			contents = append(contents, resultContent)
 
 			// Add the tool call to the tracing context
 			tracing.AddToolCallToContext(ctx, toolCallTrace)
+		}
+
+		// Add all function responses in a single content message
+		if len(functionResponses) > 0 {
+
+			// Add all function responses in a single content message
+			resultContent := &genai.Content{
+				Role:  "user",
+				Parts: functionResponses,
+			}
+			contents = append(contents, resultContent)
 		}
 
 		// Continue to the next iteration with updated contents
