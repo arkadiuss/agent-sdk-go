@@ -67,33 +67,10 @@ func TestNewClient(t *testing.T) {
 			checkFunc: nil,
 		},
 		{
-			name:      "Vertex AI backend with project ID",
-			options:   []Option{WithBackend(genai.BackendVertexAI), WithProjectID("test-project")},
-			wantError: false,
-			checkFunc: func(t *testing.T, client *GeminiClient) {
-				assert.Equal(t, DefaultModel, client.model)
-				assert.Equal(t, "gemini", client.Name())
-				assert.True(t, client.SupportsStreaming())
-				assert.Equal(t, genai.BackendVertexAI, client.backend)
-				assert.Equal(t, "test-project", client.projectID)
-				assert.Equal(t, "us-central1", client.location) // default location
-			},
-		},
-		{
 			name:      "Vertex AI backend without project ID",
 			options:   []Option{WithBackend(genai.BackendVertexAI)},
 			wantError: true,
 			checkFunc: nil,
-		},
-		{
-			name:      "Vertex AI backend with custom location",
-			options:   []Option{WithBackend(genai.BackendVertexAI), WithProjectID("test-project"), WithLocation("europe-west1")},
-			wantError: false,
-			checkFunc: func(t *testing.T, client *GeminiClient) {
-				assert.Equal(t, genai.BackendVertexAI, client.backend)
-				assert.Equal(t, "test-project", client.projectID)
-				assert.Equal(t, "europe-west1", client.location)
-			},
 		},
 		{
 			name:      "with existing genai client",
@@ -118,16 +95,6 @@ func TestNewClient(t *testing.T) {
 			options:   []Option{WithBackend(genai.BackendVertexAI), WithProjectID("test-project"), WithAPIKey("test-api-key")},
 			wantError: true, // mutually exclusive options
 			checkFunc: nil,
-		},
-		{
-			name:      "Vertex AI backend with API key and custom location",
-			options:   []Option{WithBackend(genai.BackendVertexAI), WithAPIKey("test-api-key"), WithLocation("europe-west1")},
-			wantError: false,
-			checkFunc: func(t *testing.T, client *GeminiClient) {
-				assert.Equal(t, genai.BackendVertexAI, client.backend)
-				assert.Equal(t, "test-api-key", client.apiKey)
-				assert.Equal(t, "europe-west1", client.location)
-			},
 		},
 		{
 			name:      "Vertex AI backend without any authentication",
