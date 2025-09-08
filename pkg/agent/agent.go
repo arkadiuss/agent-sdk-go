@@ -481,7 +481,7 @@ func (a *Agent) runLocal(ctx context.Context, input string) (string, error) {
 	// Add user message to memory
 	if a.memory != nil {
 		if err := a.memory.AddMessage(ctx, interfaces.Message{
-			Role:    "user",
+			Role:    interfaces.MessageRoleUser,
 			Content: input,
 		}); err != nil {
 			return "", fmt.Errorf("failed to add user message to memory: %w", err)
@@ -510,7 +510,7 @@ func (a *Agent) runLocal(ctx context.Context, input string) (string, error) {
 		// Add the role response to memory if available
 		if a.memory != nil {
 			if err := a.memory.AddMessage(ctx, interfaces.Message{
-				Role:    "assistant",
+				Role:    interfaces.MessageRoleAssistant,
 				Content: response,
 			}); err != nil {
 				return "", fmt.Errorf("failed to add role response to memory: %w", err)
@@ -603,19 +603,8 @@ func (a *Agent) createLazyMCPTools() []interfaces.Tool {
 
 // runWithoutExecutionPlanWithTools runs the agent without an execution plan but with the specified tools
 func (a *Agent) runWithoutExecutionPlanWithTools(ctx context.Context, input string, tools []interfaces.Tool) (string, error) {
-	// Get conversation history if memory is available
-	var prompt string
-	if a.memory != nil {
-		history, err := a.memory.GetMessages(ctx)
-		if err != nil {
-			return "", fmt.Errorf("failed to get conversation history: %w", err)
-		}
-
-		// Format history into prompt
-		prompt = formatHistoryIntoPrompt(history)
-	} else {
-		prompt = input
-	}
+	// Use input directly as prompt - let LLM providers handle message history via Memory
+	prompt := input
 
 	// Generate response with tools if available
 	var response string
@@ -641,8 +630,8 @@ func (a *Agent) runWithoutExecutionPlanWithTools(ctx context.Context, input stri
 	// Add max iterations option
 	generateOptions = append(generateOptions, interfaces.WithMaxIterations(a.maxIterations))
 
-	// Pass memory to LLM for tool call storage
-	if a.memory != nil && len(tools) > 0 {
+	// Always pass memory to LLM - let providers handle message history conversion natively
+	if a.memory != nil {
 		generateOptions = append(generateOptions, interfaces.WithMemory(a.memory))
 	}
 
@@ -668,7 +657,7 @@ func (a *Agent) runWithoutExecutionPlanWithTools(ctx context.Context, input stri
 	// Add agent message to memory
 	if a.memory != nil {
 		if err := a.memory.AddMessage(ctx, interfaces.Message{
-			Role:    "assistant",
+			Role:    interfaces.MessageRoleAssistant,
 			Content: response,
 		}); err != nil {
 			return "", fmt.Errorf("failed to add agent message to memory: %w", err)
@@ -715,7 +704,7 @@ func (a *Agent) approvePlan(ctx context.Context, plan *executionplan.ExecutionPl
 	// Add the approval to memory
 	if a.memory != nil {
 		if err := a.memory.AddMessage(ctx, interfaces.Message{
-			Role:    "user",
+			Role:    interfaces.MessageRoleUser,
 			Content: "I approve the plan. Please proceed with execution.",
 		}); err != nil {
 			return "", fmt.Errorf("failed to add approval to memory: %w", err)
@@ -731,7 +720,7 @@ func (a *Agent) approvePlan(ctx context.Context, plan *executionplan.ExecutionPl
 	// Add the execution result to memory
 	if a.memory != nil {
 		if err := a.memory.AddMessage(ctx, interfaces.Message{
-			Role:    "assistant",
+			Role:    interfaces.MessageRoleAssistant,
 			Content: result,
 		}); err != nil {
 			return "", fmt.Errorf("failed to add execution result to memory: %w", err)
@@ -746,7 +735,7 @@ func (a *Agent) modifyPlan(ctx context.Context, plan *executionplan.ExecutionPla
 	// Add the modification request to memory
 	if a.memory != nil {
 		if err := a.memory.AddMessage(ctx, interfaces.Message{
-			Role:    "user",
+			Role:    interfaces.MessageRoleUser,
 			Content: "I'd like to modify the plan: " + input,
 		}); err != nil {
 			return "", fmt.Errorf("failed to add modification request to memory: %w", err)
@@ -768,7 +757,7 @@ func (a *Agent) modifyPlan(ctx context.Context, plan *executionplan.ExecutionPla
 	// Add the modified plan to memory
 	if a.memory != nil {
 		if err := a.memory.AddMessage(ctx, interfaces.Message{
-			Role:    "assistant",
+			Role:    interfaces.MessageRoleAssistant,
 			Content: "I've updated the execution plan based on your feedback:\n\n" + formattedPlan + "\nDo you approve this plan? You can modify it further if needed.",
 		}); err != nil {
 			return "", fmt.Errorf("failed to add modified plan to memory: %w", err)
@@ -810,7 +799,7 @@ func (a *Agent) runWithExecutionPlan(ctx context.Context, input string) (string,
 	// Add the plan to memory
 	if a.memory != nil {
 		if err := a.memory.AddMessage(ctx, interfaces.Message{
-			Role:    "assistant",
+			Role:    interfaces.MessageRoleAssistant,
 			Content: "I've created an execution plan for your request:\n\n" + formattedPlan + "\nDo you approve this plan? You can modify it if needed.",
 		}); err != nil {
 			return "", fmt.Errorf("failed to add plan to memory: %w", err)
@@ -819,41 +808,6 @@ func (a *Agent) runWithExecutionPlan(ctx context.Context, input string) (string,
 
 	// Return the plan for user approval
 	return "I've created an execution plan for your request:\n\n" + formattedPlan + "\nDo you approve this plan? You can modify it if needed.", nil
-}
-
-// formatHistoryIntoPrompt formats conversation history into a prompt
-func formatHistoryIntoPrompt(history []interfaces.Message) string {
-	// Implementation depends on the LLM's expected format
-	var prompt string
-
-	// Format messages with clear role markers and proper separation
-	for i, msg := range history {
-		// Convert role to uppercase for clarity
-		var roleMarker string
-		switch msg.Role {
-		case "user":
-			roleMarker = "USER"
-		case "assistant":
-			roleMarker = "ASSISTANT"
-		case "tool":
-			roleMarker = "TOOL"
-		case "system":
-			roleMarker = "SYSTEM"
-		default:
-			roleMarker = strings.ToUpper(msg.Role)
-		}
-
-		// Add role marker and content
-		prompt += roleMarker + ": " + msg.Content
-
-		// Add double newline between messages for clear separation
-		// Except for the last message
-		if i < len(history)-1 {
-			prompt += "\n\n"
-		}
-	}
-
-	return prompt
 }
 
 // ApproveExecutionPlan approves an execution plan for execution
